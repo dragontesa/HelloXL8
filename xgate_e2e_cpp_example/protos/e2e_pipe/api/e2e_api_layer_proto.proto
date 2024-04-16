@@ -1,0 +1,201 @@
+syntax = "proto3";
+
+package e2e_pipe.api;
+option go_package = "github.com/xl8_protobuf/e2e_pipe";
+
+import "google/api/annotations.proto";
+
+enum ApiType {
+    // Speech to speech session.
+    SPEECH_TO_SPEECH = 0;
+    // Speech to text session.
+    SPEECH_TO_TEXT = 1;
+    // Not supported yet.
+    TEXT_TO_SPEECH = 2;
+}
+
+enum Timeliness {
+    // Realtime use-case. Typically the response has a <3 seconds delay.
+    REALTIME = 0;
+    // This may mean faster or slower than real-time.
+    BATCH = 1;
+    // This will return partial STT candidate results.
+    INTERPRETING = 2;
+}
+
+message E2eApiData {
+    oneof data {
+        // 16-bit little-endian PCM audio data.
+        bytes audio = 1;
+        // Translated text.
+        string text = 2;
+    }
+    // If additional languages were requested, the resulted texts for these languages will be added to this.
+    map<string, string> multilingual_text = 7;
+
+    // True if the result is a partial result which can be replaced by a final (non-partial) result.
+    // Used only for text data.
+    bool is_partial = 3;
+
+    // The original text before translation. Used only for text data.
+    string original = 4;
+
+    // The original time code in the source audio.
+    uint64 time_start_msec = 5;
+    uint64 time_end_msec = 6;
+}
+
+enum E2eApiResponseType {
+    // Success
+    E2E_API_RESPONSE_SUCCESS = 0;
+    // Error
+    E2E_API_RESPONSE_ERROR = 1;
+}
+
+message E2eApiTextDataFormat {
+}
+
+message E2eApiAudioDataFormat {
+    // Audio sample rate in hz. Only 16000 is supported.
+    uint32 sample_rate = 1;
+    // Number of channesls. Only 1 channel mono audio is supported.
+    uint32 channels = 2;
+}
+
+message E2eApiDataFormat {
+    // An ISO 639-1 two-letter language code.
+    string language_code = 1;
+
+    // Additional languages. If this was for a source audio format, these languages may appear in the source audio
+    // in addition to the language_code, which is the main language spoken in the audio. If this was for a target text
+    // format, these languages are additional languages the content will be translated to.
+    // Note that this list should include the language_code above.
+    repeated string additional_language_code = 4;
+
+    oneof format {
+        E2eApiTextDataFormat text_format = 2;
+        E2eApiAudioDataFormat audio_format = 3;
+    }
+}
+
+message E2eApiError {
+    // An error code.
+    string error_code = 1;
+
+    // An optional detailed error message.
+    string error_message = 2;
+}
+
+message E2eApiWebhookConfig {
+    // HTTP/HTTPS url to receive the translations via POST.
+    string webhook_url = 1;
+
+    // JSON string of the payload to send along with the translation.
+    string payload_json = 2;
+}
+
+message E2eApiInitRequest {
+    // Client ID.
+    string client_id = 1;
+    // API Key.
+    string api_key = 2;
+    // Session type.
+    ApiType api_type = 3;
+    // Timeliness.
+    Timeliness timeliness = 4;
+
+    // Source data format. Note that not all the formats are supported.
+    E2eApiDataFormat source_data_format = 5;
+    // Target data format.
+    E2eApiDataFormat target_data_format = 6;
+
+    // Timeout in seconds. (default: 60 seconds)
+    uint32 session_timeout = 7;
+
+    // Cut off sentences if it's too long, in seconds. (default: no limit)
+    uint32 max_sentence_duration = 8;
+
+    // For internal use.
+    string user_token = 9;
+
+    // Webhook configuration.
+    E2eApiWebhookConfig webhook_config = 10;
+
+    // Other options.
+    map<string, string> options = 11;
+}
+
+message E2eApiInitResponse {
+    // Session ID that should be passed in all future communications.
+    string session_id = 1;
+
+    E2eApiResponseType type = 2;
+    // The detailed error filled only when type == E2eApiResponseType.E2E_API_RESPONSE_ERROR.
+    E2eApiError error = 3;
+}
+
+message E2eApiTransRequest {
+    // Session ID.
+    string session_id = 1;
+    // Audio data to translate.
+    E2eApiData data = 2;
+}
+
+message E2eApiTransResponse {
+    // Session ID.
+    string session_id = 1;
+
+    E2eApiResponseType type = 2;
+    // The detailed error filled only when type == E2eApiResponseType.E2E_API_RESPONSE_ERROR.
+    E2eApiError error = 3;
+
+    // Translated data if available.
+    E2eApiData data = 4;
+}
+
+message E2eApiCloseRequest {
+    // Session ID.
+    string session_id = 1;
+
+    // If false, terminate the session immediately without waiting for the remaining data.
+    bool wait_to_drain = 2;
+}
+
+message E2eApiCloseResponse {
+    // Session ID.
+    string session_id = 1;
+
+    E2eApiResponseType type = 2;
+    // The detailed error filled only when type == E2eApiResponseType.E2E_API_RESPONSE_ERROR.
+    E2eApiError error = 3;
+
+    // The remaining data from the server.
+    E2eApiData data = 4;
+}
+
+// A service that Speech-to-Speech API layer will serve.
+service E2eApiService {
+    // Initialize the API service.
+    rpc InitE2e(E2eApiInitRequest) returns (E2eApiInitResponse) {
+        option (google.api.http) = {
+            post: "/v1/e2e/init"
+            body: "*"
+        };
+    }
+
+    // Process a translation request.
+    rpc TransE2e(E2eApiTransRequest) returns (E2eApiTransResponse) {
+        option (google.api.http) = {
+            post: "/v1/e2e/trans"
+            body: "*"
+        };
+    }
+
+    // Close the API service.
+    rpc CloseE2e(E2eApiCloseRequest) returns (E2eApiCloseResponse) {
+        option (google.api.http) = {
+            post: "/v1/e2e/close"
+            body: "*"
+        };
+    }
+}
